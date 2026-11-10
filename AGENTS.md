@@ -10,6 +10,12 @@ symptom narrative, no verification story — git holds the previous state. It an
 docs are formatted: run `uv run mdformat *.md docs .github tests` after editing one rather than
 matching the wrapping by hand.
 
+**Which stack you are on.** When this checkout sits inside the opendiving workspace (`../run.sh`
+exists), the dev stack runs straight on the Mac without Docker — Homebrew Postgres and Redis, the
+API (uvicorn `--reload`) and the arq worker as plain processes — and `../run.sh` owns it: `status`,
+`logs api|worker`, `signin`, `restart`. Never start a second API or worker. Everything below that
+names `docker compose` or a container is the Docker path, for a checkout outside the workspace.
+
 ## Environment & Setup
 
 - Location: `src/`
@@ -23,7 +29,12 @@ matching the wrapping by hand.
   commented out. See *"The config template is not a working configuration"* in `DECISIONS.md` before
   adding a setting that can be silently wrong.
 
-- Runs in: Docker Compose — `db` (postgres), `redis`, `api`, `worker` (arq), and `admin_init`
+- Runs in: inside the workspace, processes from `.venv` started from `src/`, logging to
+  `.logs/api.log` and `.logs/worker.log`. `--reload` watches `.py` files under `src/` only, and the
+  worker has no reload at all, so a change to `src/.env` or to a worker job needs
+  `../run.sh restart`. A one-off script runs from the repo root as
+  `.venv/bin/python -m src.scripts.…`; config reads `src/.env` wherever it is started from. On the
+  Docker path: Docker Compose — `db` (postgres), `redis`, `api`, `worker` (arq), and `admin_init`
   (one-shot, seeds the admin panel before `api` starts)
 
 - **One compose file here, and it is the development one.** The root `docker-compose.yml` builds
@@ -45,16 +56,21 @@ matching the wrapping by hand.
 
 - **Schema changes**: every one ships an Alembic revision. `alembic upgrade head` runs in the API's
   lifespan (`core/setup.py`), so a schema change reaches a database — yours or a self-hoster's — by
-  the container starting, and nothing else. Nothing calls `create_all()`: the test suite migrates
-  its own database (`tests/conftest.py`) like everything else. To change the schema:
+  the API starting. Nothing calls `create_all()`: the test suite migrates its own database
+  (`tests/conftest.py`) like everything else. To change the schema:
 
   1. Add the field to the model in `src/app/models/` and the schema in `src/app/schemas/`.
   2. `cd src && uv run alembic revision --autogenerate -m "what changed"`, then **read the generated
      file** — autogenerate is a first draft, not an answer, and it does not see a data backfill at
      all.
-  3. `docker compose restart api` to apply it — `src/migrations` is bind-mounted, so the new
-     revision is already inside the container and the lifespan runs it. (`restart` reuses the
-     existing container, so it is *not* enough after editing `docker-compose.yml`; that needs
+  3. Inside the workspace, `cd src && uv run alembic upgrade head` to apply it. Don't wait for
+     `--reload`: its `StatReload` notices an edited `.py` file but not a new one, so the revision
+     lands on whichever save under `src/` comes next — your first edit to the revision itself
+     included, which applies a draft you are still reading. Editing an applied revision changes
+     nothing; `alembic downgrade -1`, fix it, `upgrade head`. On the Docker path,
+     `docker compose restart api` applies it — `src/migrations` is bind-mounted, so the new revision
+     is already inside the container and the lifespan runs it. (`restart` reuses the existing
+     container, so it is *not* enough after editing `docker-compose.yml`; that needs
      `docker compose up -d api`. After editing the **`Dockerfile`** bare `up -d` is not enough
      either — it recreates the container from the *stale* image, so anything the Dockerfile newly
      creates is simply absent. That needs `docker compose up -d --build`, and the case that proves
@@ -69,17 +85,20 @@ matching the wrapping by hand.
   — a database created then needs one `alembic stamp head` plus an `alembic check`, per
   `CONTRIBUTING.md`.
 
-- **Auth flow**: Magic-link sign-in URLs appear in `docker compose logs api` (not emailed).
-  Copy/paste URL into browser.
+- **Auth flow**: Magic-link sign-in URLs and their six-digit codes go to the API log (not emailed):
+  `../run.sh signin` prints the latest, from `.logs/api.log`; on the Docker path,
+  `docker compose logs api`. Copy/paste URL into browser.
 
 - **SMTP_HOST**: Unset locally; sign-in links go to logs instead of email.
 
 - **Admin panel**: CRUDAdmin at `/admin` (`CRUD_ADMIN_MOUNT_PATH`), **off by default** — set
-  `CRUD_ADMIN_ENABLED=true` plus `ADMIN_USERNAME`/`ADMIN_PASSWORD` in `src/.env` to use it. The
-  `admin_init` compose service creates its tables and seeds the first admin before `api` starts, and
-  no-ops when the panel is disabled. Set `CRUD_ADMIN_DB_URL` as well: left unset, the panel's SQLite
-  file is created relative to the one-shot container's working directory, where `api` cannot read it
-  — the panel then looks initialized but every login fails.
+  `CRUD_ADMIN_ENABLED=true` plus `ADMIN_USERNAME`/`ADMIN_PASSWORD` in `src/.env` to use it. On the
+  Docker path the `admin_init` compose service creates its tables and seeds the first admin before
+  `api` starts, and no-ops when the panel is disabled. Set `CRUD_ADMIN_DB_URL` as well there: left
+  unset, the panel's SQLite file is created relative to the one-shot container's working directory,
+  where `api` cannot read it — the panel then looks initialized but every login fails. Inside the
+  workspace nothing runs it: `cd src && ../.venv/bin/python -m app.admin.initialize`, then
+  `../run.sh restart`. Run from `src/`, the API's working directory, it finds the same SQLite file.
 
 - **Never switch commit signing off on the git command line.** Where signing is on in the git
   configuration you are running under, overriding it inline buys nothing - it is the move an agent
