@@ -330,6 +330,8 @@ curl -X POST http://localhost:8000/api/v1/import/{uuid}/apply \
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability privately. Please don't open a public
   issue for one.
 - `docs/authentication.md` — the auth design, with sequence diagrams for every flow.
+- `docs/seafloor.md` — where `GET /api/v1/seafloor` gets its depths: the sources, how one is chosen,
+  and why the list is what it is.
 - `DECISIONS.md` — non-obvious choices and gotchas (schema-change workflow, check constraints,
   caching strategy…). Read it before your first PR.
 - Schema changes ship an Alembic revision and are applied on startup. A dev database created before
