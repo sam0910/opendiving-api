@@ -30,6 +30,7 @@ from .logbook_import import router as logbook_import_router
 from .map_tiles import router as map_tiles_router
 from .passkeys import router as passkeys_router
 from .people import router as people_router
+from .seafloor import router as seafloor_router
 from .sessions import router as sessions_router
 from .species import router as species_router
 from .support import router as support_router
@@ -58,6 +59,7 @@ router.include_router(dive_sites_router)
 router.include_router(dive_site_proposals_router)
 router.include_router(dive_site_proposals_admin_router)
 router.include_router(geocoding_router)
+router.include_router(seafloor_router)
 router.include_router(gear_items_router)
 router.include_router(gear_sets_router)
 router.include_router(gear_service_router)
