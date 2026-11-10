@@ -29,6 +29,11 @@ That gives you the API on <http://localhost:8000> (docs at `/docs`), PostgreSQL,
 worker. Leave `SMTP_HOST` unset locally — sign-in URLs, and the six-digit code that rides the same
 email, are then written to the API logs instead of emailed, which is what you want for development.
 
+Inside the opendiving workspace — this checkout cloned into it, with `../run.sh` beside it — the
+stack runs without Docker instead: Homebrew Postgres and Redis, and the API and worker as plain
+processes that `../run.sh` starts, stops and tails. The workspace's `../RUN.md` says how, and
+wherever this file says `docker compose`, that is the Docker path.
+
 For running the tooling (ruff, mypy, pytest) outside the container you need Python 3.15 and
 [uv](https://docs.astral.sh/uv/):
 
@@ -87,14 +92,16 @@ That matters if you touch `models/` or add a `CheckConstraint`: your local run c
 the tests that would have caught you never executed.
 
 **Bringing the stack up is not enough on its own**, and this is the trap worth knowing. The skip is
-a connection attempt against `POSTGRES_SERVER`, which `src/.env` sets to `db` — the *compose*
-hostname, which does not resolve on the host. So `docker compose up` followed by `uv run pytest` on
-the host still skips every one of them, no matter that Postgres is up and its port is published.
-Point the host run at the published port instead:
+a connection attempt against `POSTGRES_SERVER`, which a `src/.env` copied from the template sets to
+`db` — the *compose* hostname, which does not resolve on the host. So `docker compose up` followed
+by `uv run pytest` on the host still skips every one of them, no matter that Postgres is up and its
+port is published. Point the host run at the published port instead:
 
 ```bash
 POSTGRES_SERVER=localhost ENVIRONMENT=local SECRET_KEY=testsecret uv run pytest -q
 ```
+
+Inside the workspace `src/.env` already says `localhost`, so the override changes nothing there.
 
 That is the difference between a run ending `… passed, … skipped` and one ending `… passed` with no
 skip line at all. **The skip line is the whole signal** — the totals themselves say nothing, since
@@ -115,6 +122,9 @@ disposable. Dropping them is one statement per database, and the next run rebuil
 docker compose exec db psql -U postgres -Atc "SELECT datname FROM pg_database WHERE datname ~ '^opendive_test(_gw[0-9]+)?$'" \
   | xargs -I{} docker compose exec -T db psql -U postgres -c 'DROP DATABASE "{}"'
 ```
+
+Against a Postgres on the host, as inside the workspace, run the same two `psql` calls with
+`-h localhost` in place of `docker compose exec db` and `exec -T db`.
 
 Worth knowing before you go looking: those databases are migrated, not `create_all`ed, so a model
 change you have not yet generated a revision for fails these tests rather than passing them. And a
@@ -192,8 +202,8 @@ fails without the fix.
 ## Things that will bite you
 
 **Every schema change ships an Alembic revision.** The API runs `alembic upgrade head` in its
-lifespan, so your change reaches a database — yours, CI's, or a self-hosted instance's — by the
-container starting. Adding a column means:
+lifespan, so your change reaches a database — yours or a self-hosted instance's — by the API
+starting, and CI runs the same upgrade before its tests. Adding a column means:
 
 ```bash
 cd src && POSTGRES_SERVER=localhost uv run alembic revision --autogenerate -m "add dive.deco_model"
@@ -206,7 +216,8 @@ it. Autogenerate compares the models against the database it connects to and is 
 cannot see a data backfill, it renders a rename as a drop plus an add, and it will happily write
 `DROP TABLE` for anything in your database that the models no longer describe. Then
 `docker compose restart api` applies it (`src/migrations` is bind-mounted, so the new revision is
-already inside the container).
+already inside the container). Inside the workspace, `cd src && uv run alembic upgrade head` does:
+the API's `--reload` does not notice a new file.
 
 CI fails the PR if the models and the revisions disagree — it runs `alembic upgrade head` against an
 empty database and then `alembic check`, which autogenerates again and fails on any difference. That
@@ -231,7 +242,8 @@ The `check` is the part not to skip. The old workflow applied `ALTER TABLE`s by 
 descriptions, so any given machine may be missing a constraint nobody ran, or still carrying a
 column that was dropped from the models — a stamp asserts a state nobody verified, and
 migrate-on-start will never notice afterwards. Apply whatever `check` reports by hand, or wipe the
-database and let the migrations build it: `docker compose down -v && docker compose up`.
+database and let the migrations build it: `docker compose down -v && docker compose up`, or, inside
+the workspace, drop and recreate the `POSTGRES_DB` database and restart the API.
 
 **Grep [DECISIONS.md](DECISIONS.md) for what you are about to touch.** It records the non-obvious
 choices and the traps already hit — the schema-change workflow above, check-constraint behaviour,
@@ -286,6 +298,9 @@ previous reader left them:
 docker compose exec api python -m src.scripts.backfill_dive_profiles
 ```
 
+Inside the workspace, the same module runs from the repo root as
+`.venv/bin/python -m src.scripts.backfill_dive_profiles`.
+
 A bump of the FIT decoder alone (`fitdecode`) moves no version, so it is followed by the backfill
 forced over the FIT files: `--force --parser-key fit`.
 
@@ -307,9 +322,10 @@ uv run python scripts/build_commons_bundle.py /path/to/opendiving-commons   # a 
 uv run python scripts/build_marine_areas.py
 ```
 
-Each writes its output atomically (staged to `.tmp`, then `os.replace`d), because
-`docker-compose.yml` bind-mounts `./src/app` into the running container and a plain in-place write
-would let a process read a half-written file.
+Each writes its output atomically (staged to `.tmp`, then `os.replace`d), because the running API
+reads `./src/app` live — `docker-compose.yml` bind-mounts it into the container, and inside the
+workspace the API runs from it — and a plain in-place write would let a process read a half-written
+file.
 
 **`marine_areas.geojson` refreshes when the file's meaning changes, in the PR that changes it**, not
 on a clock. **The Commons bundle is re-run from the repository's `main` before every release**: that

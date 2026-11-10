@@ -154,6 +154,9 @@ That's the backend: the API on [http://localhost:8000](http://localhost:8000) (i
 scheduled jobs. Pair it with [opendiving-web](https://github.com/opendiving/opendiving-web) for the
 frontend.
 
+Inside the opendiving workspace (this checkout with `../run.sh` beside it) the same stack runs
+without Docker, started and stopped by `../run.sh`; the workspace's `../RUN.md` says how.
+
 ### Configuration
 
 An *installed* instance is configured through the `.env` beside its compose file —
@@ -202,10 +205,10 @@ commented out, and `src/app/core/config.py` is the authoritative list.
 
 #### Reading outgoing mail locally
 
-With `SMTP_HOST` unset, nothing is sent and the sign-in link is written to `docker compose logs api`
-— that's the intended local flow and it needs nothing running. To see the mail itself rendered
-instead, bring up the opt-in [Mailpit](https://mailpit.axllent.org/) profile and point the app at
-it:
+With `SMTP_HOST` unset, nothing is sent and the sign-in link is written to the API's log —
+`docker compose logs api`, or `../run.sh signin` inside the workspace. That's the intended local
+flow and it needs nothing running. To see the mail itself rendered instead, bring up the opt-in
+[Mailpit](https://mailpit.axllent.org/) profile and point the app at it:
 
 ```bash
 docker compose --profile mail up      # inbox at http://localhost:8025
@@ -217,10 +220,12 @@ SMTP_PORT=1025
 SMTP_TLS_MODE="none"
 ```
 
+`mailpit` is a compose hostname; without Docker, run Mailpit yourself and use `localhost`.
+
 Comment `SMTP_HOST` back out when you're done: left set with no Mailpit running, sends fail against
 a dead host and no link is logged either. Either way, an edit to `src/.env` needs
 `docker compose up -d --force-recreate api` to take effect — a plain `restart` reuses the
-environment the container was created with.
+environment the container was created with. Inside the workspace, `../run.sh restart`.
 
 ## API overview
 
@@ -336,8 +341,9 @@ curl -X POST http://localhost:8000/api/v1/import/{uuid}/apply \
   [CONTRIBUTING.md](CONTRIBUTING.md).
 - Re-read stored profiles after a release that moves the `divejson` pin, the `divejson-raw` image
   the `Dockerfile` pins, or the extractor version:
-  `docker compose exec api python -m src.scripts.backfill_dive_profiles`. Until it runs, every
-  profile is served as the previous reader left it.
+  `docker compose exec api python -m src.scripts.backfill_dive_profiles` (inside the workspace,
+  `.venv/bin/python -m src.scripts.backfill_dive_profiles`). Until it runs, every profile is served
+  as the previous reader left it.
 - Once, after that: `docker compose exec api python -m src.scripts.backfill_dive_figures --dry-run`,
   then without `--dry-run`. It rewrites each dive's submerged time and average depth that still hold
   the whole recording's figures to its time in the water, and leaves a value a diver typed. A
