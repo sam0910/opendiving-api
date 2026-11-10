@@ -627,6 +627,25 @@ class GeocodingSettings(BaseSettings):
     GEOCODER_PROVIDER_RATE_LIMIT_REQUESTS: int = config("GEOCODER_PROVIDER_RATE_LIMIT_REQUESTS", default=1)
 
 
+class SeafloorSettings(BaseSettings):
+    # The seafloor explorer's depth grids (`services.seafloor`), fetched server-side from public
+    # bathymetry services. Every source is keyless but one, so the feature works with nothing
+    # set.
+    #
+    # The data.go.kr service key for the Korea Hydrographic and Oceanographic Agency's water
+    # depth API, the finest source in Korean waters. Unset, that source is reported as not
+    # configured and Korean waters are answered by the global ones. data.go.kr issues it both
+    # encoded and decoded, and either works. Its quota is 10,000 requests a day, and a view the
+    # cache cannot answer spends one or two.
+    KHOA_API_KEY: SecretStr | None = config("KHOA_API_KEY", default=None, cast=SecretStr)
+    # What one account may spend on `GET /seafloor`, and the only limit on it, which 429s. Cache
+    # hits count too. A miss can spend a dozen third-party requests and some of the KHOA quota
+    # above, which every account shares, hence the dive-conditions preview's figure rather than
+    # the geocoder's.
+    SEAFLOOR_RATE_LIMIT_PER_USER: int = config("SEAFLOOR_RATE_LIMIT_PER_USER", default=120)
+    SEAFLOOR_RATE_LIMIT_WINDOW_SECONDS: int = config("SEAFLOOR_RATE_LIMIT_WINDOW_SECONDS", default=3600)
+
+
 def normalize_map_renderer_url(raw: str) -> str:
     """`MAP_RENDERER_URL` as an origin `services.map_renderer` can call, or `""` for off.
 
@@ -1277,6 +1296,7 @@ class Settings(
     EmailSettings,
     ContactSettings,
     GeocodingSettings,
+    SeafloorSettings,
     MapRendererSettings,
     SpeciesSettings,
     DiveConditionsSettings,
